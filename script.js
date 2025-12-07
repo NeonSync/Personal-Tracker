@@ -1,21 +1,23 @@
 /*****************
- *  FIREBASE AUTH + FIRESTORE (requires compat SDK loaded in index.html)
+ *  LOCAL STORAGE HELPERS
  *****************/
-let currentUser = null;
-const usersCollection = () => db.collection("users");
+const load = (k, fb) => {
+  try { return JSON.parse(localStorage.getItem(k)) ?? fb; }
+  catch { return fb; }
+};
+const save = (k, v) => localStorage.setItem(k, JSON.stringify(v));
+
 
 /*****************
- *  APP STATE
+ *  DATA
  *****************/
-let activities = [];        // [{id,name,streak,lastDone}]
-let finances = [];          // [{id,type,desc,amount,dateISO}]
-let habitLogs = {};         // { "YYYY-MM-DD": ["Gym","Pray"] }
-let monthlyBudget = null;   // number
+let activities = load("activities", []);
+let finances = load("finances", []);
+let habitLogs = load("habitLogs", {});
+let monthlyBudget = load("monthlyBudget", null);
+
 let expenseType = "expense";
 
-/*****************
- *  HELPERS
- *****************/
 const TIMEZONE = "Asia/Kolkata";
 const todayStr = () =>
   new Intl.DateTimeFormat("en-CA", {
@@ -28,225 +30,183 @@ const toUTC = (iso) => {
 };
 const diffDays = (a, b) => Math.round((toUTC(a) - toUTC(b)) / 86400000);
 
-/*****************
- *  DOM REFS (safe to read because script is placed after HTML)
- *****************/
-// Auth UI
-const loginBtn   = document.getElementById("login-btn");
-const userInfo   = document.getElementById("user-info");
-const userNameEl = document.getElementById("user-name");
-const userPhoto  = document.getElementById("user-photo");
-
-// Habits
-const activityForm  = document.getElementById("activity-form");
-const activityInput = document.getElementById("activity-input");
-const activityList  = document.getElementById("activity-list");
-
-// Expenses
-const expenseForm   = document.getElementById("expense-form");
-const expenseDesc   = document.getElementById("expense-desc");
-const expenseAmount = document.getElementById("expense-amount");
-const expenseTable  = document.getElementById("expense-table-body");
-const expenseSummary= document.getElementById("expense-summary");
-const btnExpense    = document.getElementById("btn-expense");
-const btnIncome     = document.getElementById("btn-income");
-
-// Budget
-const budgetInput   = document.getElementById("budget-input");
-const budgetSaveBtn = document.getElementById("budget-save");
-const budgetWarning = document.getElementById("budget-warning");
-
-// Calendar modal
-const openCalendarBtn = document.getElementById("open-calendar");
-const overlay         = document.getElementById("calendar-overlay");
-const calCloseBtn     = document.getElementById("cal-close");
-const calPrevBtn      = document.getElementById("cal-prev");
-const calNextBtn      = document.getElementById("cal-next");
-const calTitle        = document.getElementById("cal-title");
-const calGrid         = document.getElementById("calendar-grid");
-const dayDetails      = document.getElementById("day-details");
-
-let currentCal = new Date();
-currentCal.setDate(1); // make month math sane
 
 /*****************
- *  FIREBASE AUTH FLOW
+ *  WEEK HELPERS
  *****************/
-auth.onAuthStateChanged(async (user) => {
-  if (user) {
-    currentUser = user;
-    // Show user info
-    loginBtn.classList.add("hidden");
-    userInfo.classList.remove("hidden");
-    userNameEl.innerText = user.displayName || "You";
-    userPhoto.src = user.photoURL || "";
+function getCurrentWeekDates() {
+  const now = new Date();
+  let day = now.getDay(); // Sun=0
+  let monday = new Date(now);
+  monday.setDate(now.getDate() - (day === 0 ? 6 : day - 1));
 
-    await loadDataFromFirestore();
-    renderActivities();
-    renderFinances();
-    updateBudgetUI();
-  } else {
-    currentUser = null;
-    // Show login button, hide user box
-    loginBtn.classList.remove("hidden");
-    userInfo.classList.add("hidden");
-
-    // Clear UI (don’t leak previous user’s data)
-    activities = [];
-    finances = [];
-    habitLogs = {};
-    monthlyBudget = null;
-    renderActivities();
-    renderFinances();
-    updateBudgetUI();
+  let days = [];
+  for (let i = 0; i < 7; i++) {
+    let d = new Date(monday);
+    d.setDate(monday.getDate() + i);
+    days.push(
+      new Intl.DateTimeFormat("en-CA", {
+        timeZone: TIMEZONE,
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+      }).format(d)
+    );
   }
-});
-
-loginBtn.addEventListener("click", () => {
-  const provider = new firebase.auth.GoogleAuthProvider();
-  auth.signInWithPopup(provider);
-});
-document.getElementById("logout-btn").addEventListener("click", () => {
-  auth.signOut();
-});
-
-/*****************
- *  FIRESTORE LOAD/SAVE
- *****************/
-async function loadDataFromFirestore() {
-  if (!currentUser) return;
-  const docRef = usersCollection().doc(currentUser.uid);
-  const snap = await docRef.get();
-  if (snap.exists) {
-    const data = snap.data();
-    activities    = Array.isArray(data.activities) ? data.activities : [];
-    finances      = Array.isArray(data.finances)   ? data.finances   : [];
-    habitLogs     = data.habitLogs    || {};
-    monthlyBudget = data.monthlyBudget ?? null;
-  } else {
-    await docRef.set({
-      activities: [], finances: [], habitLogs: {}, monthlyBudget: null
-    });
-    activities = []; finances = []; habitLogs = {}; monthlyBudget = null;
-  }
+  return days;
 }
 
-async function saveDataToFirestore() {
-  if (!currentUser) return;
-  await usersCollection().doc(currentUser.uid).set({
-    activities, finances, habitLogs, monthlyBudget
-  }, { merge: true });
-}
+const weekDays = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+
 
 /*****************
- *  HABITS
+ *  RENDER HABITS
  *****************/
 function renderActivities() {
-  activityList.innerHTML = "";
+  const list = document.getElementById("activity-list");
+  list.innerHTML = "";
+
   if (!activities.length) {
-    activityList.innerHTML = `<li class="item"><span class="muted">No habits yet. Add one above.</span></li>`;
+    list.innerHTML = `<li class="item"><span class="muted">No habits yet.</span></li>`;
     return;
   }
-  activities.forEach(a => {
-    const doneToday = a.lastDone === todayStr();
+
+  const weekDates = getCurrentWeekDates();
+
+  activities.forEach(h => {
+    const doneToday = h.lastDone === todayStr();
+
+    let weeklyHTML = "";
+    weekDates.forEach((date, i) => {
+      const done = habitLogs[date]?.includes(h.name);
+      weeklyHTML += `
+        <div class="week-box">
+          <div class="week-circle">${done ? "✔️" : ""}</div>
+          <div class="week-label">${weekDays[i]}</div>
+        </div>
+      `;
+    });
+
     const li = document.createElement("li");
     li.className = "item";
     li.innerHTML = `
       <div>
-        <div class="name">${a.name}</div>
-        <div class="meta">${a.lastDone ? `Last: ${a.lastDone}` : "Not done yet"}</div>
+        <div class="name">${h.name}</div>
+        <div class="meta">${h.lastDone ? `Last: ${h.lastDone}` : "Not done yet"}</div>
       </div>
-      <div class="badge">🔥 Streak: ${a.streak || 0}</div>
+
+      <div class="badge">🔥 Streak: ${h.streak}</div>
+
       <div class="actions">
-        <button class="success" ${doneToday ? "disabled" : ""} data-action="done">Done</button>
-        <button class="secondary" data-action="reset">Reset</button>
-        <button class="danger" data-action="delete">Delete</button>
+        <button class="success" ${doneToday ? "disabled" : ""}>Done</button>
+        <button class="secondary">Reset</button>
+        <button class="danger">Delete</button>
       </div>
+
+      <div class="weekly-row">${weeklyHTML}</div>
     `;
-    li.querySelector('[data-action="done"]').onclick   = () => markHabitDone(a.id);
-    li.querySelector('[data-action="reset"]').onclick  = () => resetHabit(a.id);
-    li.querySelector('[data-action="delete"]').onclick = () => deleteHabit(a.id);
-    activityList.appendChild(li);
+
+    li.querySelector(".success").onclick = () => markHabitDone(h.id);
+    li.querySelector(".secondary").onclick = () => resetHabit(h.id);
+    li.querySelector(".danger").onclick = () => deleteHabit(h.id);
+
+    list.appendChild(li);
   });
 }
 
-async function addHabit(name) {
-  if (!currentUser) return alert("Please login first.");
-  name = (name || "").trim();
+function addHabit(name) {
+  name = name.trim();
   if (!name) return;
-  if (activities.some(h => (h.name || "").toLowerCase() === name.toLowerCase())) {
-    alert("Habit already exists."); return;
+  if (activities.some(a => a.name.toLowerCase() === name.toLowerCase())) {
+    alert("Habit already exists.");
+    return;
   }
-  activities.push({ id: crypto.randomUUID(), name, streak: 0, lastDone: null });
-  await saveDataToFirestore();
+
+  activities.push({
+    id: crypto.randomUUID(),
+    name,
+    streak: 0,
+    lastDone: null,
+  });
+
+  save("activities", activities);
   renderActivities();
 }
 
-async function markHabitDone(id) {
-  if (!currentUser) return alert("Please login first.");
-  const a = activities.find(h => h.id === id);
-  if (!a) return;
+function markHabitDone(id) {
+  const h = activities.find(a => a.id === id);
+  if (!h) return;
+
   const today = todayStr();
-  if (a.lastDone === today) return;
 
-  if (!a.lastDone) a.streak = 1;
-  else a.streak = diffDays(today, a.lastDone) === 1 ? (a.streak || 0) + 1 : 1;
-
-  a.lastDone = today;
+  if (!h.lastDone) h.streak = 1;
+  else {
+    const gap = diffDays(today, h.lastDone);
+    h.streak = gap === 1 ? h.streak + 1 : 1;
+  }
+  h.lastDone = today;
 
   if (!habitLogs[today]) habitLogs[today] = [];
-  if (!habitLogs[today].includes(a.name)) habitLogs[today].push(a.name);
+  if (!habitLogs[today].includes(h.name)) habitLogs[today].push(h.name);
 
-  await saveDataToFirestore();
+  save("activities", activities);
+  save("habitLogs", habitLogs);
   renderActivities();
 }
 
-async function resetHabit(id) {
-  const a = activities.find(h => h.id === id);
-  if (!a) return;
-  a.streak = 0; a.lastDone = null;
-  await saveDataToFirestore();
+function resetHabit(id) {
+  const h = activities.find(a => a.id === id);
+  if (!h) return;
+
+  h.streak = 0;
+  h.lastDone = null;
+
+  save("activities", activities);
   renderActivities();
 }
 
-async function deleteHabit(id) {
+function deleteHabit(id) {
   activities = activities.filter(h => h.id !== id);
-  await saveDataToFirestore();
+  save("activities", activities);
   renderActivities();
 }
+
 
 /*****************
- *  FINANCES
+ *  EXPENSE FUNCTIONS (same)
  *****************/
 function renderFinances() {
-  expenseTable.innerHTML = "";
+  const tbody = document.getElementById("expense-table-body");
+  const summary = document.getElementById("expense-summary");
+  tbody.innerHTML = "";
+
   if (!finances.length) {
-    expenseTable.innerHTML = `<tr><td colspan="5" class="muted">No entries yet.</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="5" class="muted">No entries yet.</td></tr>`;
   } else {
-    // newest first
-    finances.slice().sort((a,b)=>toUTC(b.dateISO)-toUTC(a.dateISO)).forEach(f => {
+    finances.forEach(f => {
       const tr = document.createElement("tr");
       tr.innerHTML = `
         <td>${f.type === "income" ? "💰 Income" : "💸 Expense"}</td>
         <td>${f.desc}</td>
-        <td>${Number(f.amount).toFixed(2)}</td>
+        <td>${f.amount.toFixed(2)}</td>
         <td>${f.dateISO}</td>
-        <td><button class="danger" data-id="${f.id}">Delete</button></td>
+        <td><button class="danger">Delete</button></td>
       `;
       tr.querySelector("button").onclick = () => deleteFinance(f.id);
-      expenseTable.appendChild(tr);
+      tbody.appendChild(tr);
     });
   }
+
   updateFinanceSummary();
-  updateBudgetUI();
 }
 
-async function addFinance(type, desc, amount) {
-  if (!currentUser) return alert("Please login first.");
+function addFinance(type, desc, amount) {
   amount = Number(amount);
-  if (!desc || !desc.trim() || isNaN(amount) || amount <= 0) {
-    alert("Enter valid description and amount."); return;
+  if (!desc.trim() || isNaN(amount) || amount <= 0) {
+    alert("Enter valid description and amount.");
+    return;
   }
+
   finances.push({
     id: crypto.randomUUID(),
     type,
@@ -254,181 +214,70 @@ async function addFinance(type, desc, amount) {
     amount,
     dateISO: todayStr(),
   });
-  await saveDataToFirestore();
+
+  save("finances", finances);
   renderFinances();
 }
 
-async function deleteFinance(id) {
+function deleteFinance(id) {
   finances = finances.filter(f => f.id !== id);
-  await saveDataToFirestore();
+  save("finances", finances);
   renderFinances();
 }
 
 function updateFinanceSummary() {
   const today = todayStr();
-  const month = today.slice(0,7);
+  const month = today.slice(0, 7);
 
-  const todaySpent = finances
-    .filter(f => f.type==="expense" && f.dateISO===today)
-    .reduce((s,f)=>s+Number(f.amount),0);
+  let income = 0, expense = 0;
 
-  let income=0, expense=0;
-  finances.forEach(f=>{
+  finances.forEach(f => {
     if (f.dateISO.startsWith(month)) {
-      if (f.type==="income") income += Number(f.amount);
-      else expense += Number(f.amount);
+      if (f.type === "income") income += f.amount;
+      else expense += f.amount;
     }
   });
 
-  const net = income - expense;
-  expenseSummary.textContent = `Today Spent: ₹${todaySpent.toFixed(2)} | Month: Income ₹${income.toFixed(2)}, Spent ₹${expense.toFixed(2)} | Net: ₹${net.toFixed(2)}`;
+  document.getElementById("expense-summary").textContent =
+    `Month Income: ₹${income} | Spent: ₹${expense} | Net: ₹${income - expense}`;
 }
+
 
 /*****************
- *  BUDGET
+ *  EVENTS
  *****************/
-function updateBudgetUI() {
-  // reflect message + input value
-  const month = todayStr().slice(0,7);
-  const spent = finances.filter(f=>f.type==="expense" && f.dateISO.startsWith(month))
-                        .reduce((s,f)=>s+Number(f.amount),0);
-  if (monthlyBudget && monthlyBudget > 0) {
-    const left = monthlyBudget - spent;
-    budgetWarning.classList.remove("hidden");
-    if (left < 0) {
-      budgetWarning.classList.add("danger");
-      budgetWarning.textContent = `⚠ Budget exceeded! Limit ₹${monthlyBudget.toFixed(2)} | Spent ₹${spent.toFixed(2)} | Over by ₹${Math.abs(left).toFixed(2)}`;
-    } else {
-      budgetWarning.classList.remove("danger");
-      budgetWarning.textContent = `Budget: ₹${monthlyBudget.toFixed(2)} | Spent: ₹${spent.toFixed(2)} | Remaining: ₹${left.toFixed(2)}`;
-    }
-    budgetInput.value = monthlyBudget;
-  } else {
-    budgetWarning.classList.add("hidden");
-    budgetInput.value = "";
-  }
-}
-
-/*****************
- *  CALENDAR
- *****************/
-function openCalendar() {
-  overlay.classList.remove("hidden");
-  overlay.setAttribute("aria-hidden","false");
-  renderCalendar();
-}
-function closeCalendar() {
-  overlay.classList.add("hidden");
-  overlay.setAttribute("aria-hidden","true");
-}
-
-function renderCalendar() {
-  const y = currentCal.getFullYear();
-  const m = currentCal.getMonth();
-  const monthName = new Intl.DateTimeFormat("en", { month: "long" }).format(currentCal);
-  calTitle.textContent = `${monthName} ${y}`;
-
-  calGrid.innerHTML = "";
-  // weekday headers
-  ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"].forEach(d=>{
-    const el=document.createElement("div");
-    el.className="weekday";
-    el.textContent=d;
-    calGrid.appendChild(el);
-  });
-
-  const firstDay = new Date(y, m, 1).getDay();
-  const daysInMonth = new Date(y, m+1, 0).getDate();
-
-  for (let i=0;i<firstDay;i++) calGrid.appendChild(document.createElement("div"));
-
-  // Month aggregates for speed
-  const monthKey = `${y}-${String(m+1).padStart(2,"0")}`;
-  const daySpend = {};
-  const dayIncome = {};
-  finances.forEach(f=>{
-    if (f.dateISO.startsWith(monthKey)) {
-      if (f.type==="income") dayIncome[f.dateISO] = (dayIncome[f.dateISO]||0)+Number(f.amount);
-      else daySpend[f.dateISO] = (daySpend[f.dateISO]||0)+Number(f.amount);
-    }
-  });
-
-  for (let d=1; d<=daysInMonth; d++) {
-    const iso = `${monthKey}-${String(d).padStart(2,"0")}`;
-    const cell = document.createElement("div");
-    cell.className = "day";
-    let pills = "";
-    if (habitLogs[iso] && habitLogs[iso].length) pills += `<span class="pill habit">✓ ${habitLogs[iso].length}</span>`;
-    if (daySpend[iso])  pills += `<span class="pill spend">-₹${daySpend[iso].toFixed(0)}</span>`;
-    if (dayIncome[iso]) pills += `<span class="pill income">+₹${dayIncome[iso].toFixed(0)}</span>`;
-    cell.innerHTML = `<header><span>${d}</span></header><div class="pills">${pills}</div>`;
-    cell.onclick = () => showDayDetails(iso);
-    calGrid.appendChild(cell);
-  }
-
-  dayDetails.innerHTML = `<div class="muted">Tap a date to view details.</div>`;
-}
-
-function showDayDetails(iso) {
-  const habits = habitLogs[iso] || [];
-  const spent = finances.filter(f=>f.type==="expense" && f.dateISO===iso).reduce((s,f)=>s+Number(f.amount),0);
-  const inc   = finances.filter(f=>f.type==="income"  && f.dateISO===iso).reduce((s,f)=>s+Number(f.amount),0);
-  dayDetails.innerHTML = `
-    <h4>${new Date(iso).toDateString()}</h4>
-    <div class="line"><span>Habits Done</span><span>${habits.length}</span></div>
-    <div class="muted">${habits.length ? habits.join(", ") : "None"}</div>
-    <div class="line"><span>Spent</span><span>₹${spent.toFixed(2)}</span></div>
-    <div class="line"><span>Income</span><span>₹${inc.toFixed(2)}</span></div>
-  `;
-}
-
-/*****************
- *  EVENT LISTENERS (keep OUTSIDE auth callback)
- *****************/
-// Forms
-activityForm.addEventListener("submit", async (e) => {
+document.getElementById("activity-form").addEventListener("submit", e => {
   e.preventDefault();
-  await addHabit(activityInput.value);
-  activityInput.value = "";
-  activityInput.focus();
-});
-expenseForm.addEventListener("submit", async (e) => {
-  e.preventDefault();
-  await addFinance(expenseType, expenseDesc.value, expenseAmount.value);
-  expenseDesc.value = "";
-  expenseAmount.value = "";
-  expenseDesc.focus();
+  addHabit(document.getElementById("activity-input").value);
+  document.getElementById("activity-input").value = "";
 });
 
-// Toggle buttons (also set active class for colors)
-btnExpense.addEventListener("click", () => {
+document.getElementById("expense-form").addEventListener("submit", e => {
+  e.preventDefault();
+  addFinance(
+    expenseType,
+    document.getElementById("expense-desc").value,
+    document.getElementById("expense-amount").value
+  );
+  document.getElementById("expense-desc").value = "";
+  document.getElementById("expense-amount").value = "";
+});
+
+document.getElementById("btn-expense").addEventListener("click", () => {
   expenseType = "expense";
-  btnExpense.classList.add("active");
-  btnIncome.classList.remove("active");
+  document.getElementById("btn-expense").classList.add("active");
+  document.getElementById("btn-income").classList.remove("active");
 });
-btnIncome.addEventListener("click", () => {
+
+document.getElementById("btn-income").addEventListener("click", () => {
   expenseType = "income";
-  btnIncome.classList.add("active");
-  btnExpense.classList.remove("active");
+  document.getElementById("btn-income").classList.add("active");
+  document.getElementById("btn-expense").classList.remove("active");
 });
 
-// Budget save
-budgetSaveBtn.addEventListener("click", async () => {
-  const val = Number(budgetInput.value);
-  if (isNaN(val) || val <= 0) { alert("Enter a valid budget."); return; }
-  monthlyBudget = val;
-  await saveDataToFirestore();
-  updateBudgetUI();
-});
 
-// Calendar open/close
-openCalendarBtn.addEventListener("click", openCalendar);
-calCloseBtn.addEventListener("click", closeCalendar);
-overlay.addEventListener("click", (e)=>{ if (e.target === overlay) closeCalendar(); });
-document.addEventListener("keydown", (e)=>{ if (e.key==="Escape" && !overlay.classList.contains("hidden")) closeCalendar(); });
-
-// Calendar month nav
-calPrevBtn.addEventListener("click", ()=>{ currentCal.setMonth(currentCal.getMonth()-1); currentCal.setDate(1); renderCalendar(); });
-calNextBtn.addEventListener("click", ()=>{ currentCal.setMonth(currentCal.getMonth()+1); currentCal.setDate(1); renderCalendar(); });
-
-console.log("Firebase Sync Enabled ✅");
+/*****************
+ * INIT
+ *****************/
+renderActivities();
+renderFinances();

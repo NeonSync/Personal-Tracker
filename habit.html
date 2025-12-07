@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Habit Tracker</title>
+  <link rel="stylesheet" href="habit.css" />
+</head>
+<body>
+  <header class="container header-row">
+    <div>
+      <h1>Habit Tracker</h1>
+      <p class="muted">Daily streak + current week view.</p>
+    </div>
+    <nav class="nav-links">
+      <a href="index.html">Home</a>
+      <a href="expense.html">Expense Tracker</a>
+    </nav>
+  </header>
+
+  <main class="container">
+    <section class="card">
+      <h2>Habits</h2>
+      <form id="activity-form" class="row">
+        <input type="text" id="activity-input" placeholder="Enter habit (Gym, Pray, etc.)" required />
+        <button type="submit">Add Habit</button>
+      </form>
+      <ul id="activity-list" class="list"></ul>
+    </section>
+  </main>
+
+  <footer class="container muted center">
+    Habits saved in localStorage on this device.
+  </footer>
+
+  <script src="habit.js"></script>
+</body>
+</html>

@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Expense / Income Tracker</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header class="container header-row">
+    <div>
+      <h1>Expense / Income Tracker</h1>
+      <p class="muted">Track spending, income and monthly budget.</p>
+    </div>
+    <nav class="nav-links">
+      <a href="index.html">Home</a>
+      <a href="habit.html">Habit Tracker</a>
+    </nav>
+  </header>
+
+  <main class="container">
+    <section class="card">
+      <h2>Money Tracker</h2>
+
+      <div class="toggle-group">
+        <button type="button" id="btn-expense" class="toggle-btn active" data-type="expense">
+          Expense
+        </button>
+        <button type="button" id="btn-income" class="toggle-btn" data-type="income">
+          Income
+        </button>
+      </div>
+
+      <form id="expense-form" class="row">
+        <input type="text" id="expense-desc" placeholder="Description" required />
+        <input type="number" id="expense-amount" placeholder="Amount (₹)" step="0.01" required />
+        <button type="submit">Add</button>
+      </form>
+
+      <div class="budget-row row">
+        <input type="number" id="budget-input" placeholder="Monthly budget (₹)" step="0.01" />
+        <button id="budget-save" type="button">Save Budget</button>
+      </div>
+      <div id="budget-warning" class="alert hidden"></div>
+
+      <div class="summary" id="expense-summary">
+        Today Spent: ₹0.00 | Month: Income ₹0.00, Spent ₹0.00 | Net: ₹0.00
+      </div>
+
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Type</th>
+            <th>Description</th>
+            <th>Amount (₹)</th>
+            <th>Date</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="expense-table-body"></tbody>
+      </table>
+    </section>
+
+    <div class="center">
+      <button id="open-calendar" class="secondary">📅 Open Calendar</button>
+    </div>
+  </main>
+
+  <footer class="container muted center">
+    Data is stored in localStorage on this device.
+  </footer>
+
+  <!-- CALENDAR POPUP -->
+  <div id="calendar-overlay" class="overlay hidden" aria-hidden="true">
+    <div class="modal">
+      <div class="modal-header">
+        <button id="cal-prev" class="ghost">&larr;</button>
+        <h3 id="cal-title">Month YYYY</h3>
+        <button id="cal-next" class="ghost">&rarr;</button>
+        <button id="cal-close" class="ghost close">&times;</button>
+      </div>
+
+      <div class="legend">
+        <span><span class="dot dot-habit"></span> Habit Done</span>
+        <span><span class="dot dot-spend"></span> Expense</span>
+        <span><span class="dot dot-income"></span> Income</span>
+      </div>
+
+      <div class="calendar-grid" id="calendar-grid"></div>
+
+      <div class="day-details" id="day-details">
+        <div class="muted">Tap a date to view details.</div>
+      </div>
+    </div>
+  </div>
+
+  <script src="expense.js"></script>
+</body>
+</html>
